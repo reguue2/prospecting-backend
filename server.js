@@ -151,54 +151,63 @@ app.get("/webhook", (req, res) => {
 // WEBHOOK POST (mensajes entrantes)
 app.post("/webhook", async (req, res) => {
   try {
-    const entry = req.body?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-    const msgs = value?.messages || [];
+    console.log("=== NUEVO WEBHOOK ===");
+    console.log(JSON.stringify(req.body, null, 2)); // log completo en Render
 
-    if (msgs.length > 0) {
-      const msg = msgs[0];
-      const from = msg.from; // numero del contacto
-      const ts = parseInt(msg.timestamp, 10) || nowSeconds();
+    const entries = req.body?.entry || [];
+    for (const entry of entries) {
+      const changes = entry?.changes || [];
+      for (const change of changes) {
+        const value = change?.value || {};
+        const messages = value?.messages || [];
+        const statuses = value?.statuses || [];
 
-      const text =
-        msg.text?.body ||
-        msg.button?.text ||
-        msg.interactive?.button_reply?.title ||
-        msg.interactive?.list_reply?.title ||
-        msg.interactive?.nfm_reply?.response_json ||
-        "";
+        // 1️⃣ Mensajes entrantes
+        if (messages.length > 0) {
+          for (const msg of messages) {
+            const from = msg.from;
+            const ts = parseInt(msg.timestamp, 10) || Math.floor(Date.now() / 1000);
+            const type = msg.type || "text";
 
-      const type = msg.type || "text";
+            const text =
+              msg.text?.body ||
+              msg.button?.text ||
+              msg.interactive?.button_reply?.title ||
+              msg.interactive?.list_reply?.title ||
+              msg.interactive?.nfm_reply?.response_json ||
+              "";
 
-      const client = await pool.connect();
-      try {
-        await insertMessage(client, {
-          phone: from,
-          direction: "in",
-          type,
-          text,
-          template_name: null,
-          ts
-        });
-        await upsertChat(client, {
-          phone: from,
-          preview: text,
-          ts
-        });
-      } finally {
-        client.release();
+            const client = await pool.connect();
+            try {
+              await insertMessage(client, {
+                phone: from,
+                direction: "in",
+                type,
+                text,
+                template_name: null,
+                ts,
+              });
+              await upsertChat(client, { phone: from, preview: text, ts });
+            } finally {
+              client.release();
+            }
+
+            io.emit("message:new", { phone: from });
+          }
+        }
+
+        // 2️⃣ Actualizaciones de estado (entregados, leídos, etc.)
+        if (statuses.length > 0) {
+          for (const st of statuses) {
+            console.log("Estado de mensaje:", st.status, "para", st.recipient_id);
+          }
+        }
       }
-
-      io.emit("message:new", { phone: from });
     }
-
-    // status updates de mensajes salientes (opcionalmente podrias guardarlos)
-    // const statuses = value?.statuses;
 
     res.sendStatus(200);
   } catch (e) {
-    console.error("Error en webhook", e);
+    console.error("Error en webhook:", e);
     res.sendStatus(200);
   }
 });
