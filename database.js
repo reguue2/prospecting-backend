@@ -10,17 +10,30 @@ export async function initDB() {
   });
 
   await db.exec(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS chats (
+      phone TEXT PRIMARY KEY,
+      name TEXT,
+      last_timestamp INTEGER DEFAULT 0,
+      last_preview TEXT
+    );
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      chat_id TEXT,
-      from_me INTEGER,
+      phone TEXT NOT NULL,
+      direction TEXT CHECK(direction IN ('in','out')) NOT NULL,
+      type TEXT DEFAULT 'text',
       text TEXT,
-      timestamp INTEGER
-    )
+      template_name TEXT,
+      timestamp INTEGER NOT NULL,
+      FOREIGN KEY(phone) REFERENCES chats(phone)
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_phone_time ON messages(phone, timestamp);
   `);
+
   return db;
 }
 
 export function getDB() {
+  if (!db) throw new Error("DB not initialized");
   return db;
 }
