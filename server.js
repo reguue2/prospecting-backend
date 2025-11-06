@@ -155,6 +155,7 @@ app.get("/api/templates", requirePanelToken, async (req, res) => {
 // ------------------- WEBHOOK -------------------
 
 // Verificación inicial del webhook
+// Verificación inicial
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -165,69 +166,73 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-// Mensajes entrantes y status
+// Recepción de mensajes entrantes
 app.post("/webhook", async (req, res) => {
+  console.log("📩 Webhook recibido:");
+  console.dir(req.body, { depth: null });
+
   try {
-    console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
-    try {
-      await pool.query("CREATE TABLE IF NOT EXISTS webhook_events (id bigserial primary key, received_at timestamptz default now(), payload jsonb)");
-      await pool.query("INSERT INTO webhook_events(payload) VALUES ($1)", [req.body]);
-    } catch (e) {
-      console.error("⚠️ No se pudo registrar webhook_events:", e.message);
-    }
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS webhook_events (
+        id bigserial primary key,
+        received_at timestamptz default now(),
+        payload jsonb
+      )
+    `);
+    await pool.query("INSERT INTO webhook_events(payload) VALUES ($1)", [req.body]);
+  } catch (e) {
+    console.error("⚠️ Error registrando webhook_events:", e.message);
+  }
 
-    const entries = req.body?.entry || [];
-    for (const entry of entries) {
-      const changes = entry?.changes || [];
-      for (const change of changes) {
-        const value = change?.value || {};
-        const messages = value?.messages || [];
-        const statuses = value?.statuses || [];
+  const entries = req.body?.entry || [];
+  for (const entry of entries) {
+    const changes = entry?.changes || [];
+    for (const change of changes) {
+      const value = change?.value || {};
+      const messages = value?.messages || [];
+      const statuses = value?.statuses || [];
 
-        // 1️⃣ Mensajes entrantes
-        for (const msg of messages) {
-          const from = msg.from;
-          const ts = parseInt(msg.timestamp, 10) || nowSeconds();
-          const type = msg.type || "text";
+      // Mensajes entrantes
+      for (const msg of messages) {
+        const from = msg.from;
+        const ts = parseInt(msg.timestamp, 10) || Math.floor(Date.now() / 1000);
+        const type = msg.type || "text";
 
-          const text =
-            msg.text?.body ||
-            msg.button?.text ||
-            msg.interactive?.button_reply?.title ||
-            msg.interactive?.list_reply?.title ||
-            msg.interactive?.nfm_reply?.response_json ||
-            "";
+        const text =
+          msg.text?.body ||
+          msg.button?.text ||
+          msg.interactive?.button_reply?.title ||
+          msg.interactive?.list_reply?.title ||
+          msg.interactive?.nfm_reply?.response_json ||
+          "";
 
-          const client = await pool.connect();
-          try {
-            await insertMessage(client, {
-              phone: from,
-              direction: "in",
-              type,
-              text,
-              template_name: null,
-              ts,
-            });
-            await upsertChat(client, { phone: from, preview: text, ts });
-          } finally {
-            client.release();
-          }
-
-          io.emit("message:new", { phone: from });
+        const client = await pool.connect();
+        try {
+          await insertMessage(client, {
+            phone: from,
+            direction: "in",
+            type,
+            text,
+            template_name: null,
+            ts,
+          });
+          await upsertChat(client, { phone: from, preview: text, ts });
+        } finally {
+          client.release();
         }
 
-        // 2️⃣ Actualizaciones de estado (entregado, leído, etc.)
-        for (const st of statuses) {
-          console.log("Estado:", st.status, "para", st.recipient_id, "id:", st.id);
-        }
+        console.log(`✅ Mensaje recibido de ${from}: ${text}`);
+        io.emit("message:new", { phone: from });
+      }
+
+      // Estados de mensaje (entregado, leído, etc.)
+      for (const st of statuses) {
+        console.log("ℹ️ Estado:", st.status, "para", st.recipient_id);
       }
     }
-
-    res.sendStatus(200);
-  } catch (e) {
-    console.error("❌ Error en webhook:", e);
-    res.sendStatus(200);
   }
+
+  res.sendStatus(200);
 });
 
 // Endpoint de depuración para ver último payload
