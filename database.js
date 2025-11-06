@@ -1,5 +1,5 @@
 import pg from "pg";
-import { createProxy } from "pg-ipv6-proxy";
+import tunnel from "pg-tunnel";
 
 const { Pool } = pg;
 
@@ -11,20 +11,24 @@ export async function initDB() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("Falta DATABASE_URL");
 
-  // Creamos proxy que traduce IPv4 -> IPv6
-  const proxy = await createProxy({
+  // Creamos túnel IPv4 → IPv6
+  console.log("🚀 Iniciando túnel a Supabase...");
+  const proxy = await tunnel({
     remoteHost: "db.kjgbttacpirkaydjjsp.supabase.co",
     remotePort: 5432,
+    localPort: 55432 // puerto local arbitrario
   });
+
+  console.log("✅ Túnel creado correctamente en puerto local", proxy.localPort);
 
   pool = new Pool({
     connectionString,
-    host: "127.0.0.1", // usamos el proxy local
+    host: "127.0.0.1",
     port: proxy.localPort,
-    ssl: { rejectUnauthorized: false },
+    ssl: { rejectUnauthorized: false }
   });
 
-  console.log("✅ Base de datos conectada (a través de proxy IPv6)");
+  console.log("✅ Base de datos conectada (proxy activo)");
   return pool;
 }
 
