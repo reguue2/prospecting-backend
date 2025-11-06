@@ -28,7 +28,7 @@ if (!WABA_ID) console.warn("⚠️ Falta WABA_ID (requerido para /api/templates)
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
 app.use(express.json({ limit: "1mb" }));
 
-// auth minima
+// ------------------- Autenticación mínima -------------------
 function requirePanelToken(req, res, next) {
   const t = req.header("x-api-key");
   if (!PANEL_TOKEN) return res.status(500).json({ error: "PANEL_TOKEN no configurado" });
@@ -36,6 +36,7 @@ function requirePanelToken(req, res, next) {
   return next();
 }
 
+// ------------------- Inicialización BD -------------------
 const pool = initDB();
 ensureSchema().catch((e) => {
   console.error("❌ Error creando esquema", e);
@@ -49,11 +50,13 @@ function nowSeconds() {
 
 // ------------------- RUTAS PROTEGIDAS -------------------
 
+// Obtener lista de chats
 app.get("/api/chats", requirePanelToken, async (req, res) => {
   const { rows } = await pool.query("SELECT * FROM chats ORDER BY last_timestamp DESC");
   res.json(rows);
 });
 
+// Obtener mensajes de un chat
 app.get("/api/messages/:phone", requirePanelToken, async (req, res) => {
   const phone = req.params.phone;
   const { rows } = await pool.query(
@@ -63,6 +66,7 @@ app.get("/api/messages/:phone", requirePanelToken, async (req, res) => {
   res.json(rows);
 });
 
+// Enviar mensaje (texto o plantilla)
 app.post("/api/messages/send", requirePanelToken, async (req, res) => {
   try {
     const { to, type = "text", text, template } = req.body;
@@ -71,34 +75,29 @@ app.post("/api/messages/send", requirePanelToken, async (req, res) => {
     if (type === "template") {
       if (!template?.name)
         return res.status(400).json({ error: "template.name requerido" });
+
+      const tplName = String(template.name).trim().toLowerCase();
+
+      let lang = null;
+      try {
+        const { rows } = await pool.query(
+          "SELECT language FROM templates_cache WHERE name = $1 LIMIT 1",
+          [tplName]
+        );
+        if (rows.length > 0) lang = rows[0].language;
+      } catch {}
+
+      template.name = tplName;
+      template.language = lang || String(template.language || "es_ES");
     } else {
       if (!text) return res.status(400).json({ error: "Campo 'text' requerido" });
     }
 
-    // Buscar idioma correcto de la plantilla si no se especifica
-    if (type === "template" && !template.language) {
-      try {
-        const { rows } = await pool.query(
-          "SELECT language FROM templates_cache WHERE name = $1 LIMIT 1",
-          [template.name]
-        );
-        if (rows.length > 0) {
-          template.language = rows[0].language;
-        } else {
-          template.language = "es_ES";
-        }
-      } catch (e) {
-        template.language = "es_ES";
-      }
-    }
-
-    // Enviar a Meta
     const apiResp = await sendWhatsAppMessage(
       { to, type, text, template },
       { token: WHATSAPP_TOKEN, phoneNumberId: WABA_PHONE_NUMBER_ID }
     );
 
-    // Guardar en BD
     const client = await pool.connect();
     try {
       const ts = nowSeconds();
@@ -128,7 +127,7 @@ app.post("/api/messages/send", requirePanelToken, async (req, res) => {
   }
 });
 
-// Lista plantillas desde tu WABA
+// Listar plantillas desde la WABA
 app.get("/api/templates", requirePanelToken, async (req, res) => {
   try {
     const items = await listTemplates({ token: WHATSAPP_TOKEN, wabaId: WABA_ID });
@@ -170,8 +169,13 @@ app.get("/webhook", (req, res) => {
 // Mensajes entrantes y status
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("=== NUEVO WEBHOOK ===");
-    console.log(JSON.stringify(req.body, null, 2)); // Para ver estructura real
+    // Guardar copia del payload para depuración
+    try {
+      await pool.query("CREATE TABLE IF NOT EXISTS webhook_events (id bigserial primary key, received_at timestamptz default now(), payload jsonb)");
+      await pool.query("INSERT INTO webhook_events(payload) VALUES ($1)", [req.body]);
+    } catch (e) {
+      console.error("⚠️ No se pudo registrar webhook_events:", e.message);
+    }
 
     const entries = req.body?.entry || [];
     for (const entry of entries) {
@@ -182,51 +186,40 @@ app.post("/webhook", async (req, res) => {
         const statuses = value?.statuses || [];
 
         // 1️⃣ Mensajes entrantes
-        if (messages.length > 0) {
-          for (const msg of messages) {
-            const from = msg.from;
-            const ts = parseInt(msg.timestamp, 10) || nowSeconds();
-            const type = msg.type || "text";
+        for (const msg of messages) {
+          const from = msg.from;
+          const ts = parseInt(msg.timestamp, 10) || nowSeconds();
+          const type = msg.type || "text";
 
-            const text =
-              msg.text?.body ||
-              msg.button?.text ||
-              msg.interactive?.button_reply?.title ||
-              msg.interactive?.list_reply?.title ||
-              msg.interactive?.nfm_reply?.response_json ||
-              "";
+          const text =
+            msg.text?.body ||
+            msg.button?.text ||
+            msg.interactive?.button_reply?.title ||
+            msg.interactive?.list_reply?.title ||
+            msg.interactive?.nfm_reply?.response_json ||
+            "";
 
-            const client = await pool.connect();
-            try {
-              await insertMessage(client, {
-                phone: from,
-                direction: "in",
-                type,
-                text,
-                template_name: null,
-                ts,
-              });
-              await upsertChat(client, { phone: from, preview: text, ts });
-            } finally {
-              client.release();
-            }
-
-            io.emit("message:new", { phone: from });
+          const client = await pool.connect();
+          try {
+            await insertMessage(client, {
+              phone: from,
+              direction: "in",
+              type,
+              text,
+              template_name: null,
+              ts,
+            });
+            await upsertChat(client, { phone: from, preview: text, ts });
+          } finally {
+            client.release();
           }
+
+          io.emit("message:new", { phone: from });
         }
 
         // 2️⃣ Actualizaciones de estado (entregado, leído, etc.)
-        if (statuses.length > 0) {
-          for (const st of statuses) {
-            console.log(
-              "Estado:",
-              st.status,
-              "para",
-              st.recipient_id,
-              "message_id:",
-              st.id
-            );
-          }
+        for (const st of statuses) {
+          console.log("Estado:", st.status, "para", st.recipient_id, "id:", st.id);
         }
       }
     }
@@ -236,6 +229,14 @@ app.post("/webhook", async (req, res) => {
     console.error("❌ Error en webhook:", e);
     res.sendStatus(200);
   }
+});
+
+// Endpoint de depuración para ver último payload
+app.get("/api/debug/webhook/last", requirePanelToken, async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT id, received_at, payload FROM webhook_events ORDER BY id DESC LIMIT 1"
+  );
+  res.json(rows[0] || null);
 });
 
 // ------------------- SOCKET.IO -------------------
