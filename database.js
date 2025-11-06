@@ -1,8 +1,8 @@
 import pg from "pg";
+import dns from "dns";
 const { Pool } = pg;
 
 let pool;
-
 /**
  * Inicializa la conexión al pool de PostgreSQL (Supabase)
  */
@@ -10,15 +10,18 @@ export function initDB() {
   if (pool) return pool;
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
-    throw new Error("Falta DATABASE_URL en variables de entorno");
+    throw new Error("Falta DATABASE_URL");
   }
+
+  // Forzar IPv4 para Supabase
+  dns.setDefaultResultOrder("ipv4first");
 
   pool = new Pool({
     connectionString,
-    ssl: { rejectUnauthorized: false }, // Supabase requiere SSL
+    ssl: { rejectUnauthorized: false }, // requerido por Supabase
   });
 
-  console.log("✅ Base de datos conectada correctamente");
+  console.log("✅ Base de datos conectada correctamente (IPv4 preferido)");
   return pool;
 }
 
