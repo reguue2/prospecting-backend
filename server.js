@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
-import { initDB, ensureSchema, upsertChat, insertMessage } from "./db.js";
+import { initDB, ensureSchema, upsertChat, insertMessage } from "./database.js";
 import { sendWhatsAppMessage, listTemplates } from "./meta.js";
 
 dotenv.config();
