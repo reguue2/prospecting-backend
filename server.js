@@ -168,8 +168,9 @@ app.get("/webhook", (req, res) => {
 
 // Recepción de mensajes entrantes
 app.post("/webhook", async (req, res) => {
-  console.log("📩 Webhook recibido:");
-  console.dir(req.body, { depth: null });
+  console.log("📩 Webhook recibido =========================");
+  console.log(JSON.stringify(req.body, null, 2));
+  console.log("============================================");
 
   try {
     await pool.query(`
