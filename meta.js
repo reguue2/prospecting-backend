@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const GRAPH = "https://graph.facebook.com";
-const API_VER = process.env.GRAPH_VERSION || "v21.0";
+const API_VER = process.env.GRAPH_VERSION || "v24.0";
 
 /**
  * Envía un mensaje de texto o plantilla a través de WhatsApp Cloud API
