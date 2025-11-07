@@ -134,6 +134,37 @@ app.post("/api/messages/send", requirePanelToken, async (req, res) => {
   }
 });
 
+app.get("/api/templates", requirePanelToken, async (req, res) => {
+  try {
+    // 1) Pedimos a Meta todas las plantillas del WABA correcto
+    const items = await listTemplates({
+      token: WHATSAPP_TOKEN,
+      wabaId: WABA_ID,
+    });
+
+    // 2) Actualizamos la cache en BD (opcional pero conveniente)
+    const client = await pool.connect();
+    try {
+      await client.query("DELETE FROM templates_cache");
+      for (const t of items) {
+        await client.query(
+          "INSERT INTO templates_cache(name, language, status, category) VALUES ($1,$2,$3,$4)",
+          [t.name, t.language, t.status, t.category]
+        );
+      }
+    } finally {
+      client.release();
+    }
+
+    // 3) Respondemos al frontend
+    res.json(items);
+  } catch (e) {
+    const details = e?.response?.data || e.message;
+    console.error("❌ Fallo /api/templates", details);
+    res.status(500).json({ error: "Fallo obteniendo plantillas", details });
+  }
+});
+
 // ------------------- AUDIO + WEBHOOK -------------------
 
 app.get("/webhook", (req, res) => {
