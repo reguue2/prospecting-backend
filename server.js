@@ -58,13 +58,16 @@ app.use((req, res, next) => {
 app.get("/api/chats", async (req, res) => {
   const client = await pool.connect();
   try {
-    const r = await client.query(
-      `SELECT phone, last_ts as timestamp, last_preview
-       FROM chats
-       ORDER BY last_ts DESC
-       LIMIT 500`
-    );
+    const r = await client.query(`
+      SELECT phone, timestamp, last_preview
+      FROM chats
+      ORDER BY timestamp DESC
+      LIMIT 500
+    `);
     res.json(r.rows);
+  } catch (err) {
+    console.error("Error en /api/chats:", err.message);
+    res.status(500).json({ error: "DB error" });
   } finally {
     client.release();
   }
