@@ -219,15 +219,3 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`✅ Servidor iniciado en puerto ${PORT}`);
 });
-
-app.get("/api/debug/add-media-url", async (req, res) => {
-  const key = req.query.key;
-  if (key !== PANEL_TOKEN) return res.status(401).json({ error: "No autorizado" });
-  try {
-    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url text;`);
-    res.json({ ok: true, message: "Columna media_url añadida (si no existía)" });
-  } catch (err) {
-    console.error("Error ALTER TABLE:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
