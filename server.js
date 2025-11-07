@@ -44,11 +44,9 @@ app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
 const pool = initDB();
 await ensureSchema(pool);
 
-// ---------- Auth muy simple por header ----------
+// ---------- Auth por header ----------
 app.use((req, res, next) => {
-  // permitir verificacion de webhook sin header
   if (req.path.startsWith("/webhook")) return next();
-
   const key = req.headers["x-api-key"];
   if (!key || key !== PANEL_TOKEN) return res.status(401).json({ error: "no auth" });
   next();
@@ -73,7 +71,6 @@ app.get("/api/chats", async (req, res) => {
   }
 });
 
-
 app.get("/api/messages/:phone", async (req, res) => {
   const phone = req.params.phone;
   const client = await pool.connect();
@@ -91,6 +88,7 @@ app.get("/api/messages/:phone", async (req, res) => {
   }
 });
 
+// ---------- Enviar mensaje ----------
 app.post("/api/messages/send", async (req, res) => {
   const { to, type, text, template } = req.body || {};
   try {
@@ -98,6 +96,29 @@ app.post("/api/messages/send", async (req, res) => {
       { to, type, text, template },
       { token: WHATSAPP_TOKEN, phoneNumberId: WABA_PHONE_NUMBER_ID }
     );
+
+    // Guardar mensaje saliente en BD
+    const client = await pool.connect();
+    try {
+      const ts = Math.floor(Date.now() / 1000);
+      await upsertChat(client, {
+        phone: to,
+        ts,
+        preview: text || "[Plantilla]",
+      });
+      await insertMessage(client, {
+        phone: to,
+        direction: "out",
+        type: type || "text",
+        text: text || null,
+        template_name: template?.name || null,
+        media_url: null,
+        ts,
+      });
+    } finally {
+      client.release();
+    }
+
     res.json({ ok: true, result: r.data });
   } catch (err) {
     console.error("Error enviando mensaje:", err.response?.data || err.message);
@@ -139,18 +160,15 @@ app.post("/webhook", async (req, res) => {
     const value = change?.value;
     const messages = value?.messages || [];
 
-    if (!messages.length) {
-      return res.sendStatus(200);
-    }
+    if (!messages.length) return res.sendStatus(200);
 
     const client = await pool.connect();
     try {
       for (const m of messages) {
-        const from = m.from; // telefono
+        const from = m.from;
         const ts = Number(m.timestamp || Math.floor(Date.now() / 1000));
         const type = m.type;
 
-        // Upsert chat preview
         let preview = "";
         let direction = "in";
         let saveType = "text";
@@ -178,12 +196,15 @@ app.post("/webhook", async (req, res) => {
           preview = m.document?.filename || "[DOCUMENTO]";
           saveType = "document";
           media_url = `/api/media/${mediaId}`;
-        } else if (type === "button" || type === "interactive") {
-          preview = "[INTERACTIVO]";
-          saveType = "text";
         } else {
           preview = `[${type.toUpperCase()}]`;
           saveType = "text";
+        }
+
+        // seguridad extra: si es audio pero no tiene media_url
+        if (saveType === "audio" && !media_url && (m.audio?.id || m.voice?.id)) {
+          const mediaId = m.audio?.id || m.voice?.id;
+          media_url = `/api/media/${mediaId}`;
         }
 
         await upsertChat(client, { phone: from, ts, preview });
@@ -207,13 +228,12 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
-// ---------- Proxy de media (audios, etc.) ----------
+// ---------- Proxy de media ----------
 app.get("/api/media/:id", async (req, res) => {
   const mediaId = req.params.id;
   if (!mediaId) return res.status(400).send("Falta ID");
 
   try {
-    // 1) Pedimos metadatos (url y mime_type)
     const meta = await axios.get(`${GRAPH}/${API_VER}/${mediaId}`, {
       headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
       params: { fields: "url,mime_type,sha256,file_size" },
@@ -223,18 +243,16 @@ app.get("/api/media/:id", async (req, res) => {
     const mime = meta.data?.mime_type || "application/octet-stream";
     if (!url) return res.status(404).send("No url");
 
-    // 2) Descargamos y hacemos stream al navegador
     const r = await axios.get(url, {
       responseType: "stream",
       headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
     });
 
-    // Pasamos cabeceras utiles para el <audio>
     if (r.headers["content-length"]) {
       res.setHeader("Content-Length", r.headers["content-length"]);
     }
     res.setHeader("Content-Type", mime);
-    res.setHeader("Cache-Control", "private, max-age=31536000"); // cachear si quieres
+    res.setHeader("Cache-Control", "private, max-age=31536000");
 
     r.data.pipe(res);
     r.data.on("error", (err) => {
@@ -248,7 +266,7 @@ app.get("/api/media/:id", async (req, res) => {
   }
 });
 
-// ---------- Socket.IO (opcional) ----------
+// ---------- Socket.IO ----------
 io.on("connection", () => {});
 
 // ---------- Inicio ----------
