@@ -177,7 +177,7 @@ app.post("/webhook", async (req, res) => {
                 headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
               }
             );
-            media_url = mediaResp.data.url || null;
+            media_url = `/api/media/${msg.audio.id}`;
           } catch (err) {
             console.error("⚠️ Error obteniendo URL del audio:", err.message);
           }
