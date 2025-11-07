@@ -273,25 +273,3 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
-
-// ---------- Endpoint temporal para añadir media_url ----------
-app.post("/api/admin/add-media-url-column", async (req, res) => {
-  const key = req.headers["x-api-key"];
-  if (!key || key !== PANEL_TOKEN) {
-    return res.status(401).json({ error: "no auth" });
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query(`
-      ALTER TABLE messages
-      ADD COLUMN IF NOT EXISTS media_url text;
-    `);
-    res.json({ ok: true, message: "Columna media_url añadida (si no existía)" });
-  } catch (err) {
-    console.error("Error añadiendo columna media_url:", err.message);
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-});
