@@ -129,6 +129,9 @@ app.get("/webhook", (req, res) => {
 
 app.post("/webhook", async (req, res) => {
   const body = req.body;
+  if (body?.entry) {
+    console.log("Webhook recibido:", JSON.stringify(body, null, 2));
+  }
 
   try {
     const entry = body?.entry?.[0];
@@ -159,13 +162,14 @@ app.post("/webhook", async (req, res) => {
           text = m.text?.body || "";
           preview = text.slice(0, 60);
           saveType = "text";
-        } else if (type === "audio" || type === "voice") {
-          // WhatsApp envia m.audio.id y mime_type
-          const mediaId = m.audio?.id;
+        } else if (m.audio || m.voice || type === "audio" || type === "voice") {
+          const mediaId = m.audio?.id || m.voice?.id;
           preview = "[AUDIO]";
           saveType = "audio";
-          // apuntamos al proxy estable del backend
-          media_url = `/api/media/${mediaId}`;
+          media_url = mediaId ? `/api/media/${mediaId}` : null;
+          console.log("Audio detectado:", mediaId);
+        }
+
         } else if (type === "image") {
           const mediaId = m.image?.id;
           preview = "[IMAGEN]";
