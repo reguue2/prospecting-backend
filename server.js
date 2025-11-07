@@ -32,6 +32,7 @@ if (!WABA_PHONE_NUMBER_ID) console.warn("⚠️ Falta WABA_PHONE_NUMBER_ID");
 if (!WABA_ID) console.warn("⚠️ Falta WABA_ID");
 
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
+
 app.use(express.json({ limit: "1mb" }));
 
 function requirePanelToken(req, res, next) {
