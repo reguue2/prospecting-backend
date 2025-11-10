@@ -269,6 +269,28 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.video.id}`,
               is_read: false,
             });
+          } else if (m.type === "interactive") {
+            const it = m.interactive || {};
+            let text = null;
+
+            if (it.type === "button_reply" && it.button_reply) {
+              text = it.button_reply.title || it.button_reply.id;
+            } else if (it.type === "list_reply" && it.list_reply) {
+              text = it.list_reply.title || it.list_reply.id;
+            } else {
+              text = "Respuesta interactiva";
+            }
+
+            await insertMessage({
+              phone: from,
+              direction: "in",
+              type: "interactive",
+              text,
+              template_name: null,
+              timestamp: tsSec,
+              media_url: null,
+              is_read: false,
+            });
           }
           io.emit("message:new", { phone: from });
         }
@@ -291,27 +313,3 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
-
-app.post("/api/admin/fix-schema", async (req, res) => {
-  try {
-    const p = initDB();
-    await p.query(`
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
-      CREATE INDEX IF NOT EXISTS idx_messages_phone_time ON messages(phone, timestamp);
-      CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(phone, is_read) WHERE is_read = false;
-
-      CREATE TABLE IF NOT EXISTS webhook_events (
-        id BIGSERIAL PRIMARY KEY,
-        received_at TIMESTAMPTZ DEFAULT NOW(),
-        payload JSONB
-      );
-    `);
-    res.json({ ok: true, message: "Esquema actualizado correctamente" });
-  } catch (err) {
-    console.error("Error fix-schema:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
