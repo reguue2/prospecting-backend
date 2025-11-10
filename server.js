@@ -275,19 +275,31 @@ app.get("/api/media/:id", async (req, res) => {
 
 app.patch("/api/chats/:phone/read", async (req, res) => {
   const { phone } = req.params;
+  const client = await pool.connect();
+
   try {
-    const client = await pool.connect();
-    await client.query(
-      "UPDATE messages SET is_read = TRUE WHERE phone = $1 AND direction = 'in' AND is_read = FALSE",
+    const update = await client.query(
+      `
+      UPDATE messages
+      SET is_read = TRUE
+      WHERE phone = $1
+        AND direction = 'in'
+        AND is_read = FALSE
+      `,
       [phone]
     );
+
+    console.log(`Mensajes marcados como leídos para ${phone}:`, update.rowCount);
+
     client.release();
-    res.json({ success: true });
+    return res.json({ success: true, updated: update.rowCount });
   } catch (err) {
-    console.error("Error marcando mensajes como leídos:", err);
-    res.status(500).json({ error: "Error interno" });
+    client.release();
+    console.error("Error al marcar como leídos:", err);
+    return res.status(500).json({ error: "Error interno al marcar como leídos" });
   }
 });
+
 
 // ---------- Socket.IO ----------
 io.on("connection", () => {});
@@ -296,47 +308,3 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
-
-// RUTA TEMPORAL: Ver todas las tablas y columnas de la base de datos
-app.get("/api/admin/db-structure", async (req, res) => {
-  const API_KEY = process.env.PANEL_TOKEN || "";
-  const providedKey = req.headers["x-api-key"];
-
-  if (!providedKey || providedKey !== API_KEY) {
-    return res.status(403).json({ error: "no auth" });
-  }
-
-  try {
-    const client = await pool.connect();
-    const result = await client.query(`
-      SELECT 
-        table_name, 
-        column_name, 
-        data_type, 
-        is_nullable, 
-        column_default
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-      ORDER BY table_name, ordinal_position;
-    `);
-    client.release();
-
-    // Agrupar por tabla
-    const tables = {};
-    result.rows.forEach(row => {
-      if (!tables[row.table_name]) tables[row.table_name] = [];
-      tables[row.table_name].push({
-        column: row.column_name,
-        type: row.data_type,
-        nullable: row.is_nullable,
-        default: row.column_default
-      });
-    });
-
-    res.json(tables);
-  } catch (err) {
-    console.error("Error al obtener estructura de BD:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
