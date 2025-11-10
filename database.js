@@ -70,11 +70,17 @@ export async function upsertChat(client, { phone, preview, ts }) {
   );
 }
 
-export async function insertMessage(client, { phone, direction, type, text, template_name, media_url, ts }) {
-  await client.query(
-    `INSERT INTO messages (phone, direction, type, text, template_name, media_url, timestamp)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [phone, direction, type, text, template_name, media_url, ts]
-  );
+export async function insertMessage(msg) {
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `INSERT INTO messages (chat_phone, sender, text, timestamp, is_read)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [msg.chat_phone, msg.sender, msg.text, msg.timestamp, msg.is_read ?? false]
+    );
+  } finally {
+    client.release();
+  }
 }
+
 
