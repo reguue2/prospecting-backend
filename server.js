@@ -278,6 +278,18 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.video.id}`,
               is_read: false,
             });
+          } 
+          else if (type === "audio" && m.audio?.id) {
+            await insertMessage({
+              phone: from,
+              direction: "in",
+              type: "audio",
+              text: null,
+              template_name: null,
+              timestamp: tsSec,
+              media_url: `/api/media/${m.audio.id}`,
+              is_read: false,
+            });
           }
           // --- BOTONES / LISTAS (RESPUESTAS INTERACTIVAS) ---
           else if (
@@ -336,18 +348,4 @@ io.on("connection", () => {});
 // ---------- START ----------
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
-});
-app.get("/api/admin/debug-last", async (req, res) => {
-  const { phone } = req.query;
-  if (!phone) return res.status(400).json({ error: "phone requerido" });
-  const p = initDB();
-  const { rows } = await p.query(
-    `SELECT id, phone, direction, type, text, media_url, timestamp
-     FROM messages
-     WHERE phone = $1
-     ORDER BY id DESC
-     LIMIT 10`,
-    [phone]
-  );
-  res.json(rows);
 });
