@@ -222,10 +222,20 @@ app.post("/webhook", async (req, res) => {
       for (const ch of changes) {
         const val = ch?.value || {};
         const msgs = val.messages || [];
+        const wabaId = val.metadata?.phone_number_id; // id del número WABA que recibe
+
         for (const m of msgs) {
           const from = m.from;
+          const to = m.to;
           const tsSec = Number(m.timestamp || Math.floor(Date.now() / 1000));
           const type = m.type;
+
+          // === FILTRO: solo guardar mensajes dirigidos al número WABA configurado ===
+          // si el mensaje no fue enviado al número principal, lo ignoramos
+          if (to !== WABA_PHONE_NUMBER_ID && wabaId !== WABA_PHONE_NUMBER_ID) {
+            console.log("Ignorado mensaje no dirigido al WABA principal:", { from, to, wabaId });
+            continue;
+          }
 
           // --- TEXTO ---
           if (type === "text" && m.text?.body) {
@@ -278,7 +288,8 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.video.id}`,
               is_read: false,
             });
-          } 
+          }
+          // --- AUDIO ---
           else if (type === "audio" && m.audio?.id) {
             await insertMessage({
               phone: from,
@@ -306,10 +317,8 @@ app.post("/webhook", async (req, res) => {
             } else if (it.type === "list_reply" && it.list_reply) {
               text = it.list_reply.title || it.list_reply.id;
             } else if (m.button?.text) {
-              // casos antiguos de botón
               text = m.button.text;
             } else if (m.list_reply?.title) {
-              // casos antiguos de lista
               text = m.list_reply.title;
             } else {
               text = "Respuesta interactiva";
