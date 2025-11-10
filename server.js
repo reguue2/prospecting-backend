@@ -278,13 +278,6 @@ app.patch("/api/chats/:phone/read", async (req, res) => {
   const client = await pool.connect();
 
   try {
-    // Antes de actualizar, ver cuántos hay sin leer
-    const check = await client.query(
-      "SELECT id, direction, is_read FROM messages WHERE phone = $1 ORDER BY id DESC LIMIT 5",
-      [phone]
-    );
-    console.log("ANTES de UPDATE:", check.rows);
-
     const update = await client.query(
       `
       UPDATE messages
@@ -295,16 +288,7 @@ app.patch("/api/chats/:phone/read", async (req, res) => {
       `,
       [phone]
     );
-
-    console.log(`Mensajes marcados como leídos para ${phone}: ${update.rowCount}`);
-
-    // Ver después
-    const after = await client.query(
-      "SELECT id, direction, is_read FROM messages WHERE phone = $1 ORDER BY id DESC LIMIT 5",
-      [phone]
-    );
-    console.log("DESPUÉS de UPDATE:", after.rows);
-
+    
     res.json({ success: true, updated: update.rowCount });
   } catch (err) {
     console.error("Error al marcar como leídos:", err);
