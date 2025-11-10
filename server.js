@@ -54,22 +54,26 @@ app.use((req, res, next) => {
 
 // ---------- APIs panel ----------
 app.get("/api/chats", async (req, res) => {
+  const client = await pool.connect();
   try {
-    const client = await pool.connect();
     const result = await client.query(`
-      SELECT c.*, 
+      SELECT 
+        c.*,
         EXISTS (
-          SELECT 1 FROM messages m 
-          WHERE m.phone = c.phone AND m.is_read = FALSE AND m.sender != 'me'
+          SELECT 1 FROM messages m
+          WHERE m.phone = c.phone
+            AND m.direction = 'in'
+            AND m.is_read = FALSE
         ) AS has_unread
       FROM chats c
       ORDER BY c.last_timestamp DESC
     `);
-    client.release();
     res.json(result.rows);
   } catch (err) {
-    console.error("Error obteniendo chats:", err);
+    console.error("Error al obtener chats:", err);
     res.status(500).json({ error: "Error interno" });
+  } finally {
+    client.release();
   }
 });
 
