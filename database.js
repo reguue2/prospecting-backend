@@ -1,141 +1,82 @@
-// database.js
 import pg from "pg";
-import dotenv from "dotenv";
-dotenv.config();
-
 const { Pool } = pg;
 
-const connectionString =
-  process.env.DATABASE_URL ||
-  "postgres://postgres:postgres@localhost:5432/postgres";
+let pool;
 
-export const pool = new Pool({
-  connectionString,
-  ssl:
-    process.env.PGSSL === "require"
-      ? { rejectUnauthorized: false }
-      : undefined,
-});
+export function initDB() {
+  if (pool) return pool;
 
-// Inicializacion opcional
-export async function initDB() {
-  const client = await pool.connect();
-  try {
-    // Aqui no alteramos esquema, asumimos que ya creaste las tablas y campos segun tu JSON
-    await client.query("SELECT 1");
-  } finally {
-    client.release();
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("❌ Falta DATABASE_URL en variables de entorno");
   }
+
+  pool = new Pool({
+    connectionString,
+    ssl: {
+      rejectUnauthorized: false, // Render requiere SSL
+    },
+  });
+
+  console.log("✅ Base de datos conectada correctamente (Render PostgreSQL)");
+  return pool;
 }
 
-// Asegura que exista un chat y actualiza last_preview/last_timestamp
-export async function upsertChat({ phone, name, last_preview, last_timestamp }) {
-  const client = await pool.connect();
-  try {
-    await client.query(
-      `
-      INSERT INTO chats (phone, name, last_timestamp, last_preview)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (phone)
-      DO UPDATE SET
-        name = COALESCE(EXCLUDED.name, chats.name),
-        last_timestamp = GREATEST(COALESCE(EXCLUDED.last_timestamp, 0), COALESCE(chats.last_timestamp, 0)),
-        last_preview = EXCLUDED.last_preview
-      `,
-      [phone, name || null, last_timestamp || 0, last_preview || null]
+export async function ensureSchema() {
+  const p = initDB();
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS chats (
+      phone TEXT PRIMARY KEY,
+      name TEXT,
+      last_timestamp BIGINT DEFAULT 0,
+      last_preview TEXT
     );
-  } finally {
-    client.release();
-  }
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id BIGSERIAL PRIMARY KEY,
+      phone TEXT NOT NULL,
+      direction TEXT CHECK (direction IN ('in','out')) NOT NULL,
+      type TEXT DEFAULT 'text',
+      text TEXT,
+      template_name TEXT,
+      timestamp BIGINT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_phone_time ON messages(phone, timestamp);
+
+    CREATE TABLE IF NOT EXISTS templates_cache (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      language TEXT,
+      status TEXT,
+      category TEXT,
+      last_synced_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+  console.log("🛠️ Esquema verificado correctamente");
 }
 
-// Inserta un mensaje
+export async function upsertChat(client, { phone, preview, ts }) {
+  await client.query(
+    `
+    INSERT INTO chats(phone, name, last_timestamp, last_preview)
+    VALUES($1, NULL, $2, $3)
+    ON CONFLICT (phone)
+    DO UPDATE SET
+      last_timestamp = EXCLUDED.last_timestamp,
+      last_preview   = EXCLUDED.last_preview
+    `,
+    [phone, ts, preview ?? null]
+  );
+}
+
 export async function insertMessage(msg) {
-  const {
-    phone,
-    direction, // 'in' o 'out'
-    type = "text",
-    text = null,
-    template_name = null,
-    timestamp,
-    media_url = null,
-    is_read = false, // por defecto false
-  } = msg;
-
   const client = await pool.connect();
   try {
     await client.query(
-      `
-      INSERT INTO messages (phone, direction, type, text, template_name, timestamp, media_url, is_read)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `,
-      [phone, direction, type, text, template_name, timestamp, media_url, is_read]
-    );
-  } finally {
-    client.release();
-  }
-}
-
-// Devuelve mensajes por chat (si lo necesitas en otras rutas)
-export async function getMessagesByPhone(phone) {
-  const client = await pool.connect();
-  try {
-    const r = await client.query(
-      `
-      SELECT id, phone, direction, type, text, template_name, timestamp, media_url, is_read
-      FROM messages
-      WHERE phone = $1
-      ORDER BY timestamp ASC
-      `,
-      [phone]
-    );
-    return r.rows;
-  } finally {
-    client.release();
-  }
-}
-
-// Lista de chats con flag has_unread derivado de messages.direction='in' AND is_read=false
-export async function getChatsWithUnread() {
-  const client = await pool.connect();
-  try {
-    const r = await client.query(
-      `
-      SELECT
-        c.phone,
-        c.name,
-        c.last_timestamp,
-        c.last_preview,
-        EXISTS (
-          SELECT 1
-          FROM messages m
-          WHERE m.phone = c.phone
-            AND m.direction = 'in'
-            AND m.is_read = FALSE
-        ) AS has_unread
-      FROM chats c
-      ORDER BY c.last_timestamp DESC NULLS LAST
-      `
-    );
-    return r.rows;
-  } finally {
-    client.release();
-  }
-}
-
-// Marca como leidos los entrantes de un chat
-export async function markChatRead(phone) {
-  const client = await pool.connect();
-  try {
-    await client.query(
-      `
-      UPDATE messages
-      SET is_read = TRUE
-      WHERE phone = $1
-        AND direction = 'in'
-        AND is_read = FALSE
-      `,
-      [phone]
+      `INSERT INTO messages (chat_phone, sender, text, timestamp, is_read)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [msg.chat_phone, msg.sender, msg.text, msg.timestamp, msg.is_read ?? false]
     );
   } finally {
     client.release();
