@@ -50,17 +50,18 @@ app.use("/api", authApi);
 app.get("/api/chats", async (req, res) => {
   const p = initDB();
   const { rows } = await p.query(`
-    SELECT
-      c.phone,
-      c.name,
-      c.last_timestamp,
-      c.last_preview,
-      EXISTS (
-        SELECT 1 FROM messages m
-        WHERE m.phone = c.phone AND m.direction = 'in' AND m.is_read = false
-      ) AS has_unread
-    FROM chats c
-    ORDER BY c.last_timestamp DESC NULLS LAST
+      SELECT
+    c.phone,
+    c.name,
+    c.last_timestamp,
+    c.last_preview,
+    c.pinned,
+    EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.phone = c.phone AND m.direction = 'in' AND m.is_read = false
+    ) AS has_unread
+  FROM chats c
+  ORDER BY c.pinned DESC, c.last_timestamp DESC NULLS LAST
   `);
   res.json(rows);
 });
