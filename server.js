@@ -405,13 +405,3 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
-app.post("/api/admin/add-pin-column", async (req, res) => {
-  try {
-    const p = initDB();
-    await p.query(`ALTER TABLE chats ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE`);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e.message });
-  }
-});
